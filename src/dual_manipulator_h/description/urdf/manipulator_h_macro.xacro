@@ -1,0 +1,154 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:macro name="manipulator_h_arm" params="prefix parent_link origin_xyz origin_rpy">
+
+    <xacro:property name="pi" value="3.141592654"/>
+
+    <joint name="${prefix}base_fixed" type="fixed">
+      <origin xyz="${origin_xyz}" rpy="${origin_rpy}"/>
+      <parent link="${parent_link}"/>
+      <child link="${prefix}link1"/>
+    </joint>
+
+    <link name="${prefix}link1">
+      <collision><origin xyz="0 0 0" rpy="0 0 0"/><geometry><mesh filename="file://$(find dual_manipulator_h)/description/meshes/link_1.stl" scale="0.001 0.001 0.001"/></geometry></collision>
+      <visual><origin xyz="0 0 0" rpy="0 0 0"/><geometry><mesh filename="file://$(find dual_manipulator_h)/description/meshes/link_1.stl" scale="0.001 0.001 0.001"/></geometry><material name="arm_gray"><color rgba="0.75 0.75 0.75 1.0"/></material></visual>
+      <inertial><origin xyz="0.00023 0.00000 0.06223" rpy="0 0 0"/><mass value="0.85644"/><inertia ixx="0.00121064" ixy="0.0" ixz="0.00001100" iyy="0.00120886" iyz="0.0" izz="0.00038103"/></inertial>
+    </link>
+    <joint name="${prefix}joint1" type="revolute"><parent link="${prefix}link1"/><child link="${prefix}link2"/><origin xyz="0.0 0.0 0.126" rpy="0 0 0"/><axis xyz="0 0 1"/><limit velocity="6.5" effort="1000" lower="${-pi*0.5}" upper="${pi*0.5}"/><dynamics damping="0.7"/></joint>
+
+    <link name="${prefix}link2">
+      <collision><origin xyz="0 0 0" rpy="0 0 0"/><geometry><mesh filename="file://$(find dual_manipulator_h)/description/meshes/link_2.stl" scale="0.001 0.001 0.001"/></geometry></collision>
+      <visual><origin xyz="0 0 0" rpy="0 0 0"/><geometry><mesh filename="file://$(find dual_manipulator_h)/description/meshes/link_2.stl" scale="0.001 0.001 0.001"/></geometry><material name="arm_gray"><color rgba="0.75 0.75 0.75 1.0"/></material></visual>
+      <inertial><origin xyz="0.00000 0.00080 0.03183" rpy="0 0 0"/><mass value="0.94658"/><inertia ixx="0.00152547" ixy="0.0" ixz="0.0" iyy="0.00045954" iyz="-0.00001086" izz="0.00151740"/></inertial>
+    </link>
+    <joint name="${prefix}joint2" type="revolute"><parent link="${prefix}link2"/><child link="${prefix}link3"/><origin xyz="0.0 0.069 0.033" rpy="0 0 0"/><axis xyz="0 1 0"/><limit velocity="6.5" effort="1000" lower="${-pi*0.5}" upper="${pi*0.5}"/><dynamics damping="0.7"/></joint>
+
+    <link name="${prefix}link3">
+      <collision><origin xyz="0 0 0" rpy="0 0 0"/><geometry><mesh filename="file://$(find dual_manipulator_h)/description/meshes/link_3.stl" scale="0.001 0.001 0.001"/></geometry></collision>
+      <visual><origin xyz="0 0 0" rpy="0 0 0"/><geometry><mesh filename="file://$(find dual_manipulator_h)/description/meshes/link_3.stl" scale="0.001 0.001 0.001"/></geometry><material name="arm_gray"><color rgba="0.75 0.75 0.75 1.0"/></material></visual>
+      <inertial><origin xyz="0.01768 -0.06881 0.20524" rpy="0 0 0"/><mass value="1.30260"/><inertia ixx="0.01111021" ixy="0.00001331" ixz="-0.00134208" iyy="0.01046642" iyz="0.00016235" izz="0.00202081"/></inertial>
+    </link>
+    <joint name="${prefix}joint3" type="revolute"><parent link="${prefix}link3"/><child link="${prefix}link4"/><origin xyz="0.03000 -0.01150 0.26400" rpy="0 0 0"/><axis xyz="0 1 0"/><limit velocity="6.5" effort="1000" lower="${-pi*0.5}" upper="${pi*0.5}"/><dynamics damping="0.7"/></joint>
+
+    <link name="${prefix}link4">
+      <collision><origin xyz="0 0 0" rpy="0 0 0"/><geometry><mesh filename="file://$(find dual_manipulator_h)/description/meshes/link_4.stl" scale="0.001 0.001 0.001"/></geometry></collision>
+      <visual><origin xyz="0 0 0" rpy="0 0 0"/><geometry><mesh filename="file://$(find dual_manipulator_h)/description/meshes/link_4.stl" scale="0.001 0.001 0.001"/></geometry><material name="arm_gray"><color rgba="0.75 0.75 0.75 1.0"/></material></visual>
+      <inertial><origin xyz="0.12475 -0.05716 0.02979" rpy="0 0 0"/><mass value="1.15977"/><inertia ixx="0.00096726" ixy="0.00004383" ixz="-0.00002771" iyy="0.00318801" iyz="0.00000627" izz="0.00341484"/></inertial>
+    </link>
+    <joint name="${prefix}joint4" type="revolute"><parent link="${prefix}link4"/><child link="${prefix}link5"/><origin xyz="0.19500 -0.05750 0.03000" rpy="0 0 0"/><axis xyz="1 0 0"/><limit velocity="6.5" effort="1000" lower="${-pi*0.5}" upper="${pi*0.5}"/><dynamics damping="0.7"/></joint>
+
+
+
+
+
+    <link name="${prefix}link5">
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry><mesh filename="file://$(find dual_manipulator_h)/description/meshes/link_5.stl" scale="0.001 0.001 0.001"/></geometry>
+      </collision>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry><mesh filename="file://$(find dual_manipulator_h)/description/meshes/link_5.stl" scale="0.001 0.001 0.001"/></geometry>
+        <material name="arm_gray"><color rgba="0.75 0.75 0.75 1.0"/></material>
+      </visual>
+      <inertial><origin xyz="0.05642 -0.00217 0.00002" rpy="0 0 0"/><mass value="0.44688"/><inertia ixx="0.00030285" ixy="0.00000761" ixz="0.00000031" iyy="0.00022339" iyz="-0.00000001" izz="0.00039766"/></inertial>
+    </link>
+    <joint name="${prefix}joint5" type="revolute"><parent link="${prefix}link5"/><child link="${prefix}link6"/><origin xyz="0.06300 0.04500 0.00000" rpy="0 0 0"/><axis xyz="0 1 0"/><limit velocity="6.5" effort="1000" lower="${-pi*0.5}" upper="${pi*0.5}"/><dynamics damping="0.7"/></joint>
+
+    <link name="${prefix}link6">
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry><mesh filename="file://$(find dual_manipulator_h)/description/meshes/link_6.stl" scale="0.001 0.001 0.001"/></geometry>
+      </collision>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry><mesh filename="file://$(find dual_manipulator_h)/description/meshes/link_6.stl" scale="0.001 0.001 0.001"/></geometry>
+        <material name="arm_gray"><color rgba="0.75 0.75 0.75 1.0"/></material>
+      </visual>
+      <inertial><origin xyz="0.06831 -0.04457 0.00000" rpy="0 0 0"/><mass value="0.43273"/><inertia ixx="0.00021512" ixy="0.00001009" ixz="0.00000000" iyy="0.00042827" iyz="0.00000000" izz="0.00051436"/></inertial>
+    </link>
+    <joint name="${prefix}joint6" type="revolute"><parent link="${prefix}link6"/><child link="${prefix}end_link"/><origin xyz="0.12300 -0.04500 0.00000" rpy="0 0 0"/><axis xyz="1 0 0"/><limit velocity="6.5" effort="1000" lower="${-pi*0.5}" upper="${pi*0.5}"/><dynamics damping="0.7"/></joint>
+
+    <link name="${prefix}end_link">
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry><mesh filename="file://$(find dual_manipulator_h)/description/meshes/end_link.stl" scale="0.001 0.001 0.001"/></geometry>
+      </collision>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry><mesh filename="file://$(find dual_manipulator_h)/description/meshes/end_link.stl" scale="0.001 0.001 0.001"/></geometry>
+        <material name="arm_gray"><color rgba="0.75 0.75 0.75 1.0"/></material>
+      </visual>
+      <inertial><origin xyz="0.00337 0.00000 0.00000" rpy="0 0 0"/><mass value="0.01919"/><inertia ixx="0.00000938" ixy="0.0" ixz="0.0" iyy="0.00000338" iyz="0.0" izz="0.00000635"/></inertial>
+    </link>
+
+    <ros2_control name="${prefix}GazeboSystem" type="system">
+      <hardware>
+        <plugin>gazebo_ros2_control/GazeboSystem</plugin>
+      </hardware>
+      <joint name="${prefix}joint1"><command_interface name="velocity"/><state_interface name="position"/><state_interface name="velocity"/></joint>
+      <joint name="${prefix}joint2"><command_interface name="velocity"/><state_interface name="position"/><state_interface name="velocity"/></joint>
+      <joint name="${prefix}joint3"><command_interface name="velocity"/><state_interface name="position"/><state_interface name="velocity"/></joint>
+      <joint name="${prefix}joint4"><command_interface name="velocity"/><state_interface name="position"/><state_interface name="velocity"/></joint>
+      <joint name="${prefix}joint5"><command_interface name="velocity"/><state_interface name="position"/><state_interface name="velocity"/></joint>
+      <joint name="${prefix}joint6"><command_interface name="velocity"/><state_interface name="position"/><state_interface name="velocity"/></joint>
+    </ros2_control>
+
+    <gazebo reference="${prefix}link5">
+      <selfCollide>true</selfCollide>
+      <sensor name="${prefix}sensor_colision_link5" type="contact">
+        <always_on>true</always_on>
+        <update_rate>100.0</update_rate>
+        <contact>
+          <collision>${prefix}link5_collision</collision>
+        </contact>
+        <plugin name="${prefix}bumper_link5" filename="libgazebo_ros_bumper.so">
+          <ros>
+            <namespace>benchmark</namespace>
+            <remapping>bumper_states:=colisiones/${prefix}link5</remapping>
+          </ros>
+          <frame_name>${prefix}link5</frame_name>
+        </plugin>
+      </sensor>
+    </gazebo>
+
+    <gazebo reference="${prefix}link6">
+      <selfCollide>true</selfCollide>
+      <sensor name="${prefix}sensor_colision_link6" type="contact">
+        <always_on>true</always_on>
+        <update_rate>100.0</update_rate>
+        <contact>
+          <collision>${prefix}link6_collision</collision>
+        </contact>
+        <plugin name="${prefix}bumper_link6" filename="libgazebo_ros_bumper.so">
+          <ros>
+            <namespace>benchmark</namespace>
+            <remapping>bumper_states:=colisiones/${prefix}link6</remapping>
+          </ros>
+          <frame_name>${prefix}link6</frame_name>
+        </plugin>
+      </sensor>
+    </gazebo>
+
+    <gazebo reference="${prefix}end_link">
+      <selfCollide>true</selfCollide>
+      <sensor name="${prefix}sensor_colision_end_link" type="contact">
+        <always_on>true</always_on>
+        <update_rate>100.0</update_rate>
+        <contact>
+          <collision>${prefix}end_link_collision</collision>
+        </contact>
+        <plugin name="${prefix}bumper_end_link" filename="libgazebo_ros_bumper.so">
+          <ros>
+            <namespace>benchmark</namespace>
+            <remapping>bumper_states:=colisiones/${prefix}end_link</remapping>
+          </ros>
+          <frame_name>${prefix}end_link</frame_name>
+        </plugin>
+      </sensor>
+    </gazebo>
+
+  </xacro:macro>
+</robot>
