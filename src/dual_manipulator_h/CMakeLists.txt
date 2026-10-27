@@ -35,9 +35,9 @@ install(DIRECTORY scripts/
   USE_SOURCE_PERMISSIONS
 )
 
-install(DIRECTORY scripts/pyarmor_runtime_000000
-  DESTINATION lib/${PROJECT_NAME}
-)
+# install(DIRECTORY scripts/pyarmor_runtime_000000
+#   DESTINATION lib/${PROJECT_NAME}
+# )
 
 install(
   DIRECTORY config
