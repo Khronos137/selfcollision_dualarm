@@ -1,205 +1,183 @@
+"""
+Capsule-based self-collision detector of the proposed controller (Section III).
+
+* Each arm is covered by K = 10 capsules (segment k joins chain points P[k-1], P[k]).
+* The torso is capsule index 0.
+* Global index: 0 = torso, 1..K = left arm, K+1..2K = right arm (Section III.D).
+* M[i, j] : distance between capsule AXES (Eq. 2)  -> computed with Lumelsky's
+            segment-segment algorithm.
+* C[i, j] : SURFACE CLEARANCE  C = max(0, M - r_i - r_j). Every threshold of the
+            controller (d_safe, d_crit, Eq. 3, Eq. 12, Eq. 18) is applied to C.
+
+Structural pruning (Section III.E), applied per arm with LOCAL indices k = 1..K:
+  1) Contiguous-link exclusion: capsules of the same arm are only compared when
+     they belong to rigid bodies that are not connected by a single joint
+     (|body(k) - body(l)| >= 2). Bodies follow the influence map PHI.
+  2) Base-invariant exclusion: capsules k <= K_BASE are embedded in the shoulder;
+     they are not compared with the torso, and two such capsules of different
+     arms are not compared with each other.
+  3) Kinematic-impossibility filter: pairs that cannot collide anywhere in the
+     admissible joint range (EXCLUIDOS_*, verified by tools/verificar_poda.py).
+"""
 import numpy as np
 
-# =====================================================================
-# 1. GENERACIÓN DE PUNTOS CINEMÁTICOS (9 PUNTOS)
-# =====================================================================
+K = 10
+K_BASE = 3
 
-def puntos_articulaciones_der(L, q):
-    h, b, l1, l1b, l2, l3 = L[0], L[1], L[2], L[3], L[4], L[5]
-    l1a = (l1**2 + l1b**2)**0.5
-    
-    q1, q2, q3, q4, q5, q6 = q[0], q[1], q[2] + 0.7854, q[3], q[4], q[5]
+# Capsule radius of segment k (physical envelope of the Manipulator-H links) [m]
+RADIOS = {1: 0.035, 2: 0.075, 3: 0.075, 4: 0.050, 5: 0.065,
+          6: 0.065, 7: 0.045, 8: 0.055, 9: 0.055, 10: 0.030}
 
-    # 1. Puntos Puros
-    p0 = np.array([0.0, 0.0, h])
-    p1 = np.array([0.0, -b, h])
-    
-    p2 = np.array([
-        l1 * np.sin(q2) * np.cos(q1),
-        -b - l1 * np.cos(q2),
-        h + l1 * np.sin(q2) * np.sin(q1)
-    ])
-    
-    p3 = np.array([
-        l1a * np.sin(q2 + 0.113) * np.cos(q1),
-        -b - l1a * np.cos(q2 + 0.113),
-        h + l1a * np.sin(q2 + 0.113) * np.sin(q1)
-    ])
-    
-    p4 = np.array([
-        p3[0] - l1b * np.cos(q3 + 0.67) * np.cos(q2 + 0.113) * np.cos(q1) + l1b * np.sin(q3 + 0.67) * np.sin(q2 + 0.113) * np.cos(q1),
-        p3[1] - l1b * np.cos(q3 + 0.67) * np.sin(q2 + 0.113) - l1b * np.cos(q2 + 0.113) * np.sin(q3 + 0.67),
-        p3[2] - l1b * np.cos(q3 + 0.67) * np.cos(q2 + 0.113) * np.sin(q1) + l1b * np.sin(q3 + 0.67) * np.sin(q2 + 0.113) * np.sin(q1)
-    ])
-    
-    p5 = np.array([
-        p4[0] + l2 * (np.cos(q3 + 0.67) * np.sin(q2 + 0.113) * np.cos(q1) + np.cos(q2 + 0.113) * np.sin(q3 + 0.67) * np.cos(q1)),
-        p4[1] - l2 * (np.cos(q3 + 0.67) * np.cos(q2 + 0.113) - np.sin(q3 + 0.67) * np.sin(q2 + 0.113)),
-        p4[2] + l2 * (np.cos(q3 + 0.67) * np.sin(q2 + 0.113) * np.sin(q1) + np.cos(q2 + 0.113) * np.sin(q3 + 0.67) * np.sin(q1))
-    ])
-    
-    dx6 = - l3 * (np.sin(q5) * (np.sin(q1) * np.sin(q4) - np.cos(q4) * (np.cos(q3 + 0.67) * np.cos(q2 + 0.113) * np.cos(q1) - np.sin(q3 + 0.67) * np.sin(q2 + 0.113) * np.cos(q1))) - np.cos(q5) * (np.cos(q3 + 0.67) * np.sin(q2 + 0.113) * np.cos(q1) + np.cos(q2 + 0.113) * np.sin(q3 + 0.67) * np.cos(q1)))
-    dy6 = - l3 * (np.cos(q5) * (np.cos(q3 + 0.67) * np.cos(q2 + 0.113) - np.sin(q3 + 0.67) * np.sin(q2 + 0.113)) - np.cos(q4) * np.sin(q5) * (np.cos(q3 + 0.67) * np.sin(q2 + 0.113) + np.cos(q2 + 0.113) * np.sin(q3 + 0.67)))
-    dz6 = + l3 * (np.cos(q5) * (np.cos(q3 + 0.67) * np.sin(q2 + 0.113) * np.sin(q1) + np.cos(q2 + 0.113) * np.sin(q3 + 0.67) * np.sin(q1)) + np.sin(q5) * (np.cos(q4) * (np.cos(q3 + 0.67) * np.cos(q2 + 0.113) * np.sin(q1) - np.sin(q3 + 0.67) * np.sin(q2 + 0.113) * np.sin(q1)) + np.cos(q1) * np.sin(q4)))
-    p6 = np.array([p5[0] + dx6, p5[1] + dy6, p5[2] + dz6])
+# Torso: URDF cylinder of radius 0.10 m and height 0.80 m (z in [0, 0.8]),
+# enclosed by a capsule whose axis spans z in [0.10, 0.80].
+TORSO_BASE = np.array([0.0, 0.0, 0.10])
+TORSO_TOP = np.array([0.0, 0.0, 0.80])
+RADIO_TORSO = 0.10
 
-    p1_in = p1 + 0.15 * (p0 - p1)  
-    p1_out = p1 + 0.2 * (p2 - p1) 
-    p4_out = p4 + 0.2 * (p5 - p4) 
-    p5_in = p5 - 0.10 * (p5 - p4)
-    p5_out = p5 + 0.35 * (p6 - p5)
-
-    pts = [p0, p1_in, p1, p1_out, p2, p4, p4_out, p5_in, p5, p5_out, p6]
-    return [list(pt) for pt in pts]
+# Kinematic influence map PHI(k): index of the most distal joint that moves capsule k
+PHI = {1: 0, 2: 0, 3: 2, 4: 2, 5: 3, 6: 3, 7: 3, 8: 3, 9: 5, 10: 5}
+# Rigid bodies of the chain (consecutive values of PHI)
+_niveles = sorted(set(PHI.values()))
+CUERPO = {k: _niveles.index(PHI[k]) for k in PHI}
 
 
+# Kinematic-impossibility filter: pairs whose minimum clearance over the whole
+# admissible joint range is positive (verified with tools/verificar_poda.py,
+# 1e5 samples per arm, margin 0.02 m). They can never collide.
+EXCLUIDOS_INTRA = {(5, 1), (5, 2), (6, 1), (6, 2)}     # (distal, proximal)
+EXCLUIDOS_TORSO = {4, 5}
 
-def puntos_articulaciones_izq(L, q):
-    h, b, l1, l1b, l2, l3 = L[0], L[1], L[2], L[3], L[4], L[5]
-    l1a = (l1**2 + l1b**2)**0.5
-    
-    q1, q2, q3, q4, q5, q6 = q[0], q[1], q[2] + 0.7854, q[3], q[4], q[5] 
 
-    p0 = np.array([0.0, 0.0, h])
-    p1 = np.array([0.0, b, h])
-    
-    p2 = np.array([
-        l1 * np.sin(q2) * np.cos(q1),
-        b + l1 * np.cos(q2),
-        h - l1 * np.sin(q2) * np.sin(q1)
-    ])
-    
-    p3 = np.array([
-        l1a * np.sin(q2 + 0.113) * np.cos(q1),
-        b + l1a * np.cos(q2 + 0.113),
-        h - l1a * np.sin(q2 + 0.113) * np.sin(q1)
-    ])
-    
-    p4 = np.array([
-        p3[0] - l1b * np.cos(q3 + 0.67) * np.cos(q2 + 0.113) * np.cos(q1) + l1b * np.sin(q3 + 0.67) * np.sin(q2 + 0.113) * np.cos(q1),
-        p3[1] + l1b * np.cos(q3 + 0.67) * np.sin(q2 + 0.113) + l1b * np.cos(q2 + 0.113) * np.sin(q3 + 0.67),
-        p3[2] + l1b * np.cos(q3 + 0.67) * np.cos(q2 + 0.113) * np.sin(q1) - l1b * np.sin(q3 + 0.67) * np.sin(q2 + 0.113) * np.sin(q1)
-    ])
-    
-    p5 = np.array([
-        p4[0] + l2 * (np.cos(q3 + 0.67) * np.sin(q2 + 0.113) * np.cos(q1) + np.cos(q2 + 0.113) * np.sin(q3 + 0.67) * np.cos(q1)),
-        p4[1] + l2 * (np.cos(q3 + 0.67) * np.cos(q2 + 0.113) - np.sin(q3 + 0.67) * np.sin(q2 + 0.113)),
-        p4[2] - l2 * (np.cos(q3 + 0.67) * np.sin(q2 + 0.113) * np.sin(q1) + np.cos(q2 + 0.113) * np.sin(q3 + 0.67) * np.sin(q1))
-    ])
-    
-    dx6 = - l3 * (np.sin(q5) * (np.sin(q1) * np.sin(q4) - np.cos(q4) * (np.cos(q3 + 0.67) * np.cos(q2 + 0.113) * np.cos(q1) - np.sin(q3 + 0.67) * np.sin(q2 + 0.113) * np.cos(q1))) - np.cos(q5) * (np.cos(q3 + 0.67) * np.sin(q2 + 0.113) * np.cos(q1) + np.cos(q2 + 0.113) * np.sin(q3 + 0.67) * np.cos(q1)))
-    dy6 = + l3 * (np.cos(q5) * (np.cos(q3 + 0.67) * np.cos(q2 + 0.113) - np.sin(q3 + 0.67) * np.sin(q2 + 0.113)) - np.cos(q4) * np.sin(q5) * (np.cos(q3 + 0.67) * np.sin(q2 + 0.113) + np.cos(q2 + 0.113) * np.sin(q3 + 0.67)))
-    dz6 = - l3 * (np.cos(q5) * (np.cos(q3 + 0.67) * np.sin(q2 + 0.113) * np.sin(q1) + np.cos(q2 + 0.113) * np.sin(q3 + 0.67) * np.sin(q1)) + np.sin(q5) * (np.cos(q4) * (np.cos(q3 + 0.67) * np.cos(q2 + 0.113) * np.sin(q1) - np.sin(q3 + 0.67) * np.sin(q2 + 0.113) * np.sin(q1)) + np.cos(q1) * np.sin(q4)))
-    p6 = np.array([p5[0] + dx6, p5[1] + dy6, p5[2] + dz6])
-
-    # Envoltorio del motor (Misma interpolación, cero problemas de signos)
-    p1_in = p1 + 0.15 * (p0 - p1)  
-    p1_out = p1 + 0.2 * (p2 - p1) 
-    p4_out = p4 + 0.2 * (p5 - p4) 
-    p5_in = p5 - 0.10 * (p5 - p4)
-    p5_out = p5 + 0.35 * (p6 - p5)
-
-    pts = [p0, p1_in, p1, p1_out, p2, p4, p4_out, p5_in, p5, p5_out, p6]
-    return [list(pt) for pt in pts]
+def indice_global(brazo, k):
+    return k if brazo == 'L' else K + k
 
 
 # =====================================================================
-# 2. SISTEMA DE DETECCIÓN DE COLISIONES
+# 1. SEGMENT-SEGMENT CLOSEST POINTS (Lumelsky), Section III.B-C
 # =====================================================================
-
-def distancia_segmento_segmento(p1, p2, p3, p4):
-    """Algoritmo de Lumelsky (Se queda igual)"""
-    u = p2 - p1; v = p4 - p3; w = p1 - p3
-    a = np.dot(u, u); b = np.dot(u, v); c = np.dot(v, v)
-    d = np.dot(u, w); e = np.dot(v, w)
+def segmento_segmento(p1, p2, p3, p4, eps=1e-12):
+    """Closest points between segments [p1,p2] and [p3,p4].
+    Returns (distance, s, t, c1, c2) with c1 = p1 + s(p2-p1), c2 = p3 + t(p4-p3).
+    Near-parallel segments: the midpoint of the overlapping parametric interval
+    is used (no arbitrary zero-anchoring), Section III.C."""
+    u = p2 - p1
+    v = p4 - p3
+    w = p1 - p3
+    a = u @ u; b = u @ v; c = v @ v; d = u @ w; e = v @ w
     D = a * c - b * b
-    
-    if D < 1e-8:
-        sN = 0.0; sD = 1.0; tN = e; tD = c
+
+    if a < eps and c < eps:
+        s, t = 0.0, 0.0
+    elif a < eps:
+        s, t = 0.0, min(max(e / c, 0.0), 1.0)
+    elif c < eps:
+        s, t = min(max(-d / a, 0.0), 1.0), 0.0
+    elif D <= 1e-9 * a * c:
+        # (near) parallel: project the second segment on the first one
+        s3 = ((p3 - p1) @ u) / a
+        s4 = ((p4 - p1) @ u) / a
+        lo, hi = max(0.0, min(s3, s4)), min(1.0, max(s3, s4))
+        if lo <= hi:
+            s = 0.5 * (lo + hi)                      # midpoint of the overlap
+        else:
+            s = 0.0 if max(s3, s4) < 0.0 else 1.0    # disjoint: nearest endpoint
+        t = min(max(((p1 + s * u - p3) @ v) / c, 0.0), 1.0)
     else:
-        sN = (b * e - c * d); tN = (a * e - b * d); sD = D; tD = D
-        if sN < 0.0: sN = 0.0; tN = e; tD = c
-        elif sN > sD: sN = sD; tN = e + b; tD = c
+        s = min(max((b * e - c * d) / D, 0.0), 1.0)
+        t = (b * s + e) / c
+        if t < 0.0:
+            t = 0.0
+            s = min(max(-d / a, 0.0), 1.0)
+        elif t > 1.0:
+            t = 1.0
+            s = min(max((b - d) / a, 0.0), 1.0)
+    c1 = p1 + s * u
+    c2 = p3 + t * v
+    return float(np.linalg.norm(c1 - c2)), s, t, c1, c2
 
-    if tN < 0.0:
-        tN = 0.0
-        if -d < 0.0: sN = 0.0
-        elif -d > a: sN = sD
-        else: sN = -d; sD = a
-    elif tN > tD:
-        tN = tD
-        if (-d + b) < 0.0: sN = 0.0
-        elif (-d + b) > a: sN = sD
-        else: sN = (-d + b); sD = a
 
-    sc = 0.0 if abs(sN) < 1e-8 else sN / sD
-    tc = 0.0 if abs(tN) < 1e-8 else tN / tD
-    
-    dP = w + (sc * u) - (tc * v)
-    return np.linalg.norm(dP)
-
-def revisar_estado_seguridad(puntos_globales, radios_eslabones, radio_torso=0.15):
-    alertas = []
-    orden = ['j0', 'j1', 'j2', 'j3', 'j4', 'j5', 'j6', 'j7', 'j8', 'j9', 'j10'] # ¡11 Elementos!
-    
-    # MATRIZ 9x9
-    matriz_distancias = np.zeros((11, 11))
-    
-    torso_b = puntos_globales['torso_base']
-    torso_t = puntos_globales['torso_top']
-    
-    for prefix in ['left', 'right']:
-        for i in range(1, len(orden)):
-            p1 = puntos_globales[f'{prefix}_{orden[i-1]}']
-            p2 = puntos_globales[f'{prefix}_{orden[i]}']
-            
-            r_actual = radios_eslabones[orden[i]]
-            
-            if min(p1[2], p2[2]) < r_actual:
-                alertas.append(f"Colisión Suelo: {prefix} {orden[i]}")
-                
-            dist_torso = distancia_segmento_segmento(p1, p2, torso_b, torso_t)
-            
-            if prefix == 'left': matriz_distancias[i, 0] = dist_torso 
-            else: matriz_distancias[0, i] = dist_torso
-            
-            # El torso ignora las colisiones con los primeros 4 eslabones que están empotrados en él
-            if i > 4: 
-                if dist_torso < (r_actual + radio_torso):
-                    alertas.append(f"Colisión Torso: {prefix} {orden[i]}")
-
-    for i in range(1, len(orden)):
-        for j in range(1, len(orden)):
-            L1 = puntos_globales[f'left_{orden[i-1]}']
-            L2 = puntos_globales[f'left_{orden[i]}']
-            R1 = puntos_globales[f'right_{orden[j-1]}']
-            R2 = puntos_globales[f'right_{orden[j]}']
-            
-            dist_brazos = distancia_segmento_segmento(L1, L2, R1, R2)
-            matriz_distancias[i, j] = dist_brazos
-            
-            # Filtro de imposibilidad física ajustado a la nueva cadena (ignorar choques internos de hombros)
-            if i <= 4 and j <= 4:
+# =====================================================================
+# 2. VALID PAIRS (pruned topological matrix), Section III.E
+# =====================================================================
+def _construir_pares():
+    pares = []   # (tipo, (brazo_a, k_a), (brazo_b, k_b))
+    for brazo in ('L', 'R'):
+        for k in range(K_BASE + 1, K + 1):
+            if k not in EXCLUIDOS_TORSO:
+                pares.append(('torso', (brazo, k), ('T', 0)))
+    for k in range(1, K + 1):
+        for l in range(1, K + 1):
+            if k <= K_BASE and l <= K_BASE:
                 continue
-            
-            r_L = radios_eslabones[orden[i]]
-            r_R = radios_eslabones[orden[j]]
-            
-            if dist_brazos < (r_L + r_R):
-                alertas.append(f"Auto-Colisión: left_{orden[i]} con right_{orden[j]}")
+            pares.append(('cross', ('L', k), ('R', l)))
+    for brazo in ('L', 'R'):
+        for k in range(1, K + 1):
+            for l in range(k + 1, K + 1):
+                if abs(CUERPO[k] - CUERPO[l]) >= 2 and (l, k) not in EXCLUIDOS_INTRA:
+                    pares.append(('intra', (brazo, l), (brazo, k)))   # (distal, proximal)
+    return pares
 
-    hay_colision = len(alertas) > 0
-    return hay_colision, alertas, matriz_distancias
 
-def obtener_puntos_actuales(q_left, q_right, L):
-    pts_L = puntos_articulaciones_izq(L, q_left)
-    pts_R = puntos_articulaciones_der(L, q_right)
-    
-    puntos = {}
-    for i in range(11): # ¡Cambio vital a 11!
-        puntos[f'left_j{i}'] = np.array(pts_L[i])
-        puntos[f'right_j{i}'] = np.array(pts_R[i])
-        
-    puntos['torso_base'] = np.array([0.0, 0.0, 0.0])
-    puntos['torso_top']  = np.array([0.0, 0.0, 0.7]) 
-    return puntos
+PARES = _construir_pares()
+
+
+# =====================================================================
+# 3. GEOMETRIC STATE OF THE ROBOT
+# =====================================================================
+def estado_geometrico(P_L, P_R):
+    """P_L, P_R: (11, 3) chain points.
+    Returns dict with:
+      M, C          : (2K+1, 2K+1) axis distances and surface clearances (inf if pruned)
+      amenazas_L/R  : dict k -> closest threat of capsule k
+                      {'d', 'p', 'p_obs', 's', 'tipo', 'obs': (brazo, k_obs, t_obs), 'dir_obs'}
+      clear_L/R     : minimum clearance of each arm (metric)
+    For intra-arm pairs the threat is assigned to the distal capsule only, which
+    uses the relative Jacobian of both closest points (Section IV.C)."""
+    n = 2 * K + 1
+    M = np.full((n, n), np.inf)
+    C = np.full((n, n), np.inf)
+    P = {'L': P_L, 'R': P_R}
+    amenazas = {'L': {}, 'R': {}}
+
+    def registrar(brazo, k, d, s, p, p_obs, tipo, obs, dir_obs):
+        actual = amenazas[brazo].get(k)
+        if actual is None or d < actual['d']:
+            amenazas[brazo][k] = {'d': d, 's': s, 'p': p, 'p_obs': p_obs, 'tipo': tipo,
+                                  'obs': obs, 'dir_obs': dir_obs}
+
+    for tipo, (ba, ka), (bb, kb) in PARES:
+        a1, a2 = P[ba][ka - 1], P[ba][ka]
+        if tipo == 'torso':
+            b1, b2, rb = TORSO_BASE, TORSO_TOP, RADIO_TORSO
+        else:
+            b1, b2, rb = P[bb][kb - 1], P[bb][kb], RADIOS[kb]
+        dist, s, t, ca, cb = segmento_segmento(a1, a2, b1, b2)
+        clr = max(0.0, dist - RADIOS[ka] - rb)
+        gi = indice_global(ba, ka)
+        gj = 0 if tipo == 'torso' else indice_global(bb, kb)
+        M[gi, gj] = M[gj, gi] = dist
+        C[gi, gj] = C[gj, gi] = clr
+
+        registrar(ba, ka, clr, s, ca, cb, tipo, (bb, kb, t), b2 - b1)
+        if tipo == 'cross':
+            registrar(bb, kb, clr, t, cb, ca, tipo, (ba, ka, s), a2 - a1)
+
+    clear_L = min((a['d'] for a in amenazas['L'].values()), default=np.inf)
+    clear_R = min((a['d'] for a in amenazas['R'].values()), default=np.inf)
+    return {'M': M, 'C': C, 'amenazas_L': amenazas['L'], 'amenazas_R': amenazas['R'],
+            'clear_L': clear_L, 'clear_R': clear_R}
+
+
+# =====================================================================
+# 4. COMPATIBILITY WITH THE RVIZ HELPERS
+# =====================================================================
+def puntos_dict(P_L, P_R):
+    """Point dictionary used by libreria_rviz.generar_esqueleto_colisiones."""
+    d = {f'left_j{i}': P_L[i] for i in range(11)}
+    d.update({f'right_j{i}': P_R[i] for i in range(11)})
+    d['torso_base'] = TORSO_BASE
+    d['torso_top'] = TORSO_TOP
+    return d
+
+
+RADIOS_DICT = {f'j{k}': r for k, r in RADIOS.items()}

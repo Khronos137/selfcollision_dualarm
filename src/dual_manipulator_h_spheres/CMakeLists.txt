@@ -14,6 +14,10 @@ install(
     scripts/libreria_cinematica_der.py
     scripts/libreria_cinematica_izq.py
     scripts/libreria_rviz.py
+    scripts/leiStrategy.py
+    scripts/cinematica_puntos.py
+    scripts/benchmark_common.py
+    scripts/nodo_benchmark.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

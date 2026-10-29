@@ -1,6 +1,6 @@
 controller_manager:
   ros__parameters:
-    update_rate: 100
+    update_rate: 1000   # must match the Gazebo physics step (1 ms): velocity is re-applied every step
 
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
@@ -49,20 +49,22 @@ right_velocity_controller:
       - velocity
 
 # --------------------------------------------------------
-# 3. LOS MÚSCULOS DE GAZEBO CLASSIC (El secreto del Torque)
+# 3. PID gains of gazebo_ros2_control: DISABLED for the sign/velocity test.
+#    With p = 100 on very light links (wrist roll and end link) the internal
+#    loop can become unstable. Uncomment to restore the previous behaviour.
 # --------------------------------------------------------
-gazebo_ros2_control:
-  ros__parameters:
-    pid_gains:
-      left_joint1:  {p: 100.0, i: 0.1, d: 1.0}
-      left_joint2:  {p: 100.0, i: 0.1, d: 1.0}
-      left_joint3:  {p: 100.0, i: 0.1, d: 1.0}
-      left_joint4:  {p: 100.0, i: 0.1, d: 1.0}
-      left_joint5:  {p: 100.0, i: 0.1, d: 1.0}
-      left_joint6:  {p: 100.0, i: 0.1, d: 1.0}
-      right_joint1: {p: 100.0, i: 0.1, d: 1.0}
-      right_joint2: {p: 100.0, i: 0.1, d: 1.0}
-      right_joint3: {p: 100.0, i: 0.1, d: 1.0}
-      right_joint4: {p: 100.0, i: 0.1, d: 1.0}
-      right_joint5: {p: 100.0, i: 0.1, d: 1.0}
-      right_joint6: {p: 100.0, i: 0.1, d: 1.0}
+# gazebo_ros2_control:
+#   ros__parameters:
+#     pid_gains:
+#       left_joint1:  {p: 100.0, i: 0.1, d: 1.0}
+#       left_joint2:  {p: 100.0, i: 0.1, d: 1.0}
+#       left_joint3:  {p: 100.0, i: 0.1, d: 1.0}
+#       left_joint4:  {p: 100.0, i: 0.1, d: 1.0}
+#       left_joint5:  {p: 100.0, i: 0.1, d: 1.0}
+#       left_joint6:  {p: 100.0, i: 0.1, d: 1.0}
+#       right_joint1: {p: 100.0, i: 0.1, d: 1.0}
+#       right_joint2: {p: 100.0, i: 0.1, d: 1.0}
+#       right_joint3: {p: 100.0, i: 0.1, d: 1.0}
+#       right_joint4: {p: 100.0, i: 0.1, d: 1.0}
+#       right_joint5: {p: 100.0, i: 0.1, d: 1.0}
+#       right_joint6: {p: 100.0, i: 0.1, d: 1.0}

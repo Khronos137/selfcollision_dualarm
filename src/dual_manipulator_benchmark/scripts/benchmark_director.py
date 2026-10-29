@@ -1,198 +1,216 @@
 #!/usr/bin/env python3
+"""
+Benchmark director: sends the trajectories, arbitrates collisions from the Gazebo
+contact sensors and writes one CSV row per arm and trial.
+
+Changes in revision 2:
+  * contact sensors on every moving link (link2..link6, end_link) of both arms (R2-C1);
+  * the colliding pair (collision1 / collision2 names) is stored for every event;
+  * contacts present at the collision-free home posture during a short calibration
+    window (mesh overlaps of the model itself) are reported and ignored;
+  * explicit Trial_ID column, so the statistical pairing is unambiguous (R2-C3);
+  * the controllers report their metrics as JSON (all timing statistics included).
+
+Parameters: trajectory_file, csv_file, contacts_file, calibration_s, n_trials
+"""
+import os
+import csv
+import json
+from datetime import datetime
+
 import rclpy
+import yaml
 from rclpy.node import Node
 from std_msgs.msg import String
-from dual_manipulator_benchmark.msg import BezierTrajectory
-from gazebo_msgs.msg import ContactsState  # IMPORTANTE: Para leer los Bumpers
-import yaml
-import os
-import csv                                 # IMPORTANTE: Para escribir el archivo
-from datetime import datetime              # IMPORTANTE: Para las marcas de tiempo
+from gazebo_msgs.msg import ContactsState
 from ament_index_python.packages import get_package_share_directory
-from functools import partial              # IMPORTANTE: Para pasar argumentos extra a los callbacks
+
+from dual_manipulator_benchmark.msg import BezierTrajectory
+
+ENLACES = ['link2', 'link3', 'link4', 'link5', 'link6', 'end_link']
+
+COLUMNAS = ['timestamp', 'trial_id', 'algorithm', 'arm', 'result', 'rmse_m', 'ce', 'jpl_rad',
+            'jpl_meas_rad', 'min_clearance_m', 'final_err_m', 'time_factor', 't_total_s',
+            't_reach_002_s', 't_reach_005_s', 'pipeline_mean_ms', 'pipeline_p99_ms',
+            'pipeline_max_ms', 'collision_mean_ms', 'callback_mean_ms', 'callback_p99_ms',
+            'callback_max_ms', 'deadline_misses', 'n_cycles', 'period_mean_ms', 'period_std_ms',
+            'period_max_ms', 'state_age_max_ms', 'contact_pairs']
+
+
+def _limpiar(nombre):
+    # 'dual_arm_manipulator::left_link5::left_link5_collision' -> 'left_link5'
+    partes = nombre.split('::')
+    return partes[1] if len(partes) >= 2 else nombre
+
 
 class BenchmarkDirector(Node):
+
     def __init__(self):
         super().__init__('benchmark_director')
-        
-        # --- VARIABLES DEL ÁRBITRO (¡Ahora son independientes!) ---
-        self.colision_L = False
-        self.colision_R = False
-        
-        # EL CSV MAESTRO E INDESTRUCTIBLE
-        self.csv_filename = "resultados_benchmark_master.csv"
-        
-        # Revisamos si el archivo ya existe para NO sobreescribirlo ni repetir encabezados
-        if not os.path.exists(self.csv_filename):
-            with open(self.csv_filename, mode='w', newline='') as file:
-                writer = csv.writer(file)
-                # --- MODIFICACIÓN: Añadidas las 3 columnas de tiempo al final ---
-                writer.writerow(['Timestamp', 'Algorithm', 'Arm', 'Result', 'RMSE_m', 'TJV_rad', 'Jerk_rad_s', 'MinDist_m', 'FinalErr_m', 'TimeFactor', 'TC_Mean_ms', 'TC_Max_ms', 'TCol_Mean_ms'])
-            self.get_logger().info(f"📄 Archivo CSV creado: {self.csv_filename}")
-        else:
-            self.get_logger().info(f"📄 Archivo CSV detectado. Se añadirán datos a: {self.csv_filename}")
-            
-        # --- SUSCRIPTORES DEL ÁRBITRO ---
+        self.declare_parameter('trajectory_file', 'trayectorias_50.yaml')
+        self.declare_parameter('csv_file', 'resultados_benchmark.csv')
+        self.declare_parameter('contacts_file', 'contactos_benchmark.csv')
+        self.declare_parameter('calibration_s', 3.0)
+        self.declare_parameter('n_trials', 0)          # 0 = all trajectories in the file
+        self.csv_file = self.get_parameter('csv_file').value
+        self.contacts_file = self.get_parameter('contacts_file').value
+        self.calibracion_s = float(self.get_parameter('calibration_s').value)
+
+        if not os.path.exists(self.csv_file):
+            with open(self.csv_file, 'w', newline='') as f:
+                csv.writer(f).writerow(COLUMNAS)
+        if not os.path.exists(self.contacts_file):
+            with open(self.contacts_file, 'w', newline='') as f:
+                csv.writer(f).writerow(['timestamp', 'trial_id', 'phase', 'body_1', 'body_2'])
+
+        ruta = self.get_parameter('trajectory_file').value
+        if not os.path.isabs(ruta):
+            ruta = os.path.join(get_package_share_directory('dual_manipulator_benchmark'), 'config', ruta)
+        with open(ruta) as f:
+            self.rutas = yaml.safe_load(f).get('trayectorias', [])
+        n = int(self.get_parameter('n_trials').value)
+        if n > 0:
+            self.rutas = self.rutas[:n]
+        self.get_logger().info(f'{len(self.rutas)} trajectories loaded from {ruta}')
+
+        for lado in ('left', 'right'):
+            for enlace in ENLACES:
+                self.create_subscription(ContactsState, f'/benchmark/colisiones/{lado}_{enlace}',
+                                         self.callback_bumper, 10)
         self.create_subscription(String, '/benchmark/metricas', self.callback_metricas, 10)
-        
-        # Suscriptores a los Bumpers Izquierdos
-        topicos_left = [
-            '/benchmark/colisiones/left_end_link', '/benchmark/colisiones/left_link5', '/benchmark/colisiones/left_link6'
-        ]
-        for topico in topicos_left:
-            self.create_subscription(ContactsState, topico, partial(self.callback_bumper, brazo="LEFT"), 10)
-
-        # Suscriptores a los Bumpers Derechos
-        topicos_right = [
-            '/benchmark/colisiones/right_end_link', '/benchmark/colisiones/right_link5', '/benchmark/colisiones/right_link6'
-        ]
-        for topico in topicos_right:
-            self.create_subscription(ContactsState, topico, partial(self.callback_bumper, brazo="RIGHT"), 10)
-
-        # --- PUBLICADORES Y SUSCRIPTORES NORMALES ---
+        self.create_subscription(String, '/benchmark/status', self.cb_status, 10)
         self.pub_traj_L = self.create_publisher(BezierTrajectory, '/benchmark/left_arm_traj', 10)
         self.pub_traj_R = self.create_publisher(BezierTrajectory, '/benchmark/right_arm_traj', 10)
-        self.create_subscription(String, '/benchmark/status', self.cb_status, 10)
         self.pub_logger_cmd = self.create_publisher(String, '/benchmark/logger_cmd', 10)
-        
-        self.trayectoria_actual = 0
-        self.total_trayectorias = 0
-        self.estado = "INICIO" # INICIO, EJECUTANDO, RETORNANDO_HOME, ESPERANDO
-        self.tiempo_llegada_home = 0.0
-        
-        paquete_share = get_package_share_directory('dual_manipulator_benchmark')
-        ruta_yaml = os.path.join(paquete_share, 'config', 'trayectorias_50.yaml')
-        self.rutas = self.cargar_rutas_yaml(ruta_yaml)
-        
-        if self.rutas:
-            self.total_trayectorias = len(self.rutas)
-            self.get_logger().info(f"DIRECTOR INICIADO: {self.total_trayectorias} trayectorias. Arrancando...")
-            self.timer = self.create_timer(0.5, self.maquina_estados)
-        else:
-            self.get_logger().error("YAML vacío o corrupto.")
 
-    def callback_bumper(self, msg, brazo):
-        # Si hay contacto, penalizamos SOLO al brazo que reportó el golpe
-        if len(msg.states) > 0:
-            if brazo == "LEFT" and not self.colision_L:
-                self.get_logger().fatal("💥 ÁRBITRO: ¡COLISIÓN DETECTADA EN EL BRAZO IZQUIERDO!")
-                self.colision_L = True
-            elif brazo == "RIGHT" and not self.colision_R:
-                self.get_logger().fatal("💥 ÁRBITRO: ¡COLISIÓN DETECTADA EN EL BRAZO DERECHO!")
-                self.colision_R = True
+        self.ignorados = set()                 # pairs in contact at the home posture
+        self.contactos = set()                 # pairs in contact during the current trial
+        self.trayectoria_actual = 0
+        # Start: bring both arms to home, then calibrate contacts AT home, then run trials
+        self.estado = 'HOMING_INICIAL'
+        self.t_inicio = self.ahora()
+        self.t_ultimo_home = -1e9
+        self.timer = self.create_timer(0.5, self.maquina_estados)
+
+    def ahora(self):
+        return self.get_clock().now().nanoseconds / 1e9
+
+    # -----------------------------------------------------------------
+    def callback_bumper(self, msg):
+        for st in msg.states:
+            par = tuple(sorted((_limpiar(st.collision1_name), _limpiar(st.collision2_name))))
+            if self.estado == 'CALIBRANDO':
+                if par not in self.ignorados:
+                    self.ignorados.add(par)
+                    self.get_logger().warn(f'Contact at home posture (will be ignored): {par}')
+                    self._guardar_contacto(-1, 'calibration', par)
+            elif self.estado == 'EJECUTANDO' and par not in self.ignorados:
+                if par not in self.contactos:
+                    self.contactos.add(par)
+                    self.get_logger().fatal(f'COLLISION in trial {self.trayectoria_actual}: {par}')
+                    self._guardar_contacto(self.trayectoria_actual, 'trial', par)
+
+    def _guardar_contacto(self, trial, fase, par):
+        with open(self.contacts_file, 'a', newline='') as f:
+            csv.writer(f).writerow([datetime.now().strftime('%H:%M:%S'), trial, fase, par[0], par[1]])
+
+    def _brazo_en_colision(self, brazo):
+        prefijo = 'left_' if brazo == 'LEFT' else 'right_'
+        return [p for p in self.contactos if p[0].startswith(prefijo) or p[1].startswith(prefijo)]
 
     def callback_metricas(self, msg):
-        datos = msg.data.split('|')
-        
-        if datos[0] == "METRICS":
-            algoritmo = datos[1]  # LUMELSKY o LEI
-            brazo = datos[2]      # LEFT o RIGHT
-            resultado = datos[3]  # SUCCESS o TIMEOUT
-            
-            # 🛑 JUSTICIA DEL ÁRBITRO: Castigamos solo al culpable
-            if brazo == "LEFT" and self.colision_L:
-                resultado = "COLLISION"
-            elif brazo == "RIGHT" and self.colision_R:
-                resultado = "COLLISION"
-                
-            rmse = datos[4]
-            tjv = datos[5]
-            jerk = datos[6]
-            min_dist = datos[7]
-            final_err = datos[8]
-            time_factor = datos[9]
-            
-            # --- MODIFICACIÓN: LECTURA INTELIGENTE DE CPU ---
-            # Si el mensaje trae 13 partes (Brazo Izquierdo), extraemos los tiempos.
-            # Si trae menos (Brazo Derecho), dejamos las celdas en blanco.
-            t_cpu_mean = datos[10] if len(datos) >= 13 else ""
-            t_cpu_max  = datos[11] if len(datos) >= 13 else ""
-            t_col_mean = datos[12] if len(datos) >= 13 else ""
-            
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            
-            # Escribir la fila en el CSV usando modo Append ('a')
-            with open(self.csv_filename, mode='a', newline='') as file:
-                writer = csv.writer(file)
-                # Añadimos las 3 variables nuevas al final de la fila
-                writer.writerow([timestamp, algoritmo, brazo, resultado, rmse, tjv, jerk, min_dist, final_err, time_factor, t_cpu_mean, t_cpu_max, t_col_mean])
-                
-            self.get_logger().info(f"📊 Métricas Guardadas -> {algoritmo} | {brazo} | Veredicto Final: {resultado}")
-
-    def cargar_rutas_yaml(self, filepath):
         try:
-            with open(filepath, 'r') as f:
-                datos = yaml.safe_load(f)
-                return datos.get('trayectorias', [])
-        except Exception as e:
-            return []
+            d = json.loads(msg.data)
+        except json.JSONDecodeError:
+            self.get_logger().error(f'Unreadable metrics message: {msg.data[:80]}')
+            return
+        if d.get('trial_id') != self.trayectoria_actual:
+            self.get_logger().warn(f"Controller trial_id {d.get('trial_id')} != director "
+                                   f'{self.trayectoria_actual}; using the director index.')
+        pares = self._brazo_en_colision(d['arm'])
+        if pares:
+            d['result'] = 'COLLISION'
+        d['trial_id'] = self.trayectoria_actual
+        d['timestamp'] = datetime.now().strftime('%H:%M:%S')
+        d['contact_pairs'] = ';'.join(f'{a}|{b}' for a, b in sorted(pares))
+        with open(self.csv_file, 'a', newline='') as f:
+            csv.writer(f).writerow(['' if d.get(c) is None else d.get(c) for c in COLUMNAS])
+        self.get_logger().info(f"Trial {d['trial_id']} | {d['algorithm']} | {d['arm']} | {d['result']}")
 
-    def cb_status(self, msg: String):
-        if msg.data == "REACHED" and self.estado == "EJECUTANDO":
-            self.get_logger().info(f"✅ Trayectoria #{self.trayectoria_actual} completada.")
-            
-            # Guardar datos en el logger obsoleto (Opcional, lo puedes borrar luego si quieres)
-            cmd_msg = String()
-            cmd_msg.data = f"SAVE_{self.trayectoria_actual}"
-            self.pub_logger_cmd.publish(cmd_msg)
-            
-            # Comandar Retorno Seguro a Home (Enviando bandera t_total = -1.0)
-            self.get_logger().info("🏠 Comandando retorno suave a Home...")
-            msg_home = BezierTrajectory()
-            msg_home.t_total = -1.0 
-            self.pub_traj_L.publish(msg_home)
-            self.pub_traj_R.publish(msg_home)
-            self.estado = "RETORNANDO_HOME"
-            
-        elif msg.data == "HOME_REACHED" and self.estado == "RETORNANDO_HOME":
-            self.get_logger().info("🤖 Brazos en Home. Estabilizando vibraciones (1.5s)...")
-            self.tiempo_llegada_home = self.get_clock().now().nanoseconds / 1e9
-            self.estado = "ESPERANDO"
+    def _pedir_home(self):
+        home = BezierTrajectory()
+        home.t_total = -1.0
+        self.pub_traj_L.publish(home)
+        self.pub_traj_R.publish(home)
+
+    def cb_status(self, msg):
+        if msg.data == 'HOME_REACHED' and self.estado == 'HOMING_INICIAL':
+            self.get_logger().info('Arms at home. Calibrating contact sensors...')
+            self.estado = 'CALIBRANDO'
+            self.t_inicio = self.ahora()
+            return
+        if msg.data == 'REACHED' and self.estado == 'EJECUTANDO':
+            self.estado = 'RETORNANDO_HOME'
+            home = BezierTrajectory()
+            home.t_total = -1.0
+            self.pub_traj_L.publish(home)
+            self.pub_traj_R.publish(home)
+        elif msg.data == 'HOME_REACHED' and self.estado == 'RETORNANDO_HOME':
+            self.t_llegada_home = self.ahora()
+            self.estado = 'ESPERANDO'
 
     def maquina_estados(self):
-        if self.estado == "INICIO":
-            if self.trayectoria_actual < self.total_trayectorias:
-                self.enviar_nueva_trayectoria(self.trayectoria_actual)
-                self.estado = "EJECUTANDO"
+        if self.estado == 'HOMING_INICIAL':
+            # (re)send the home request every 2 s until the controller confirms it
+            if self.ahora() - self.t_ultimo_home > 2.0:
+                self.get_logger().info('Waiting for the controller to reach home...')
+                self._pedir_home()
+                self.t_ultimo_home = self.ahora()
+        elif self.estado == 'CALIBRANDO':
+            if self.ahora() - self.t_inicio >= self.calibracion_s:
+                self.get_logger().info(f'Calibration finished. Ignored home contacts: {self.ignorados}')
+                self.estado = 'INICIO'
+        elif self.estado == 'INICIO':
+            if self.trayectoria_actual < len(self.rutas):
+                self.enviar_trayectoria(self.trayectoria_actual)
+                self.estado = 'EJECUTANDO'
             else:
-                self.get_logger().info("🎉 BENCHMARK FINALIZADO EXITOSAMENTE.")
-                self.estado = "FIN"
+                self.get_logger().info('BENCHMARK FINISHED.')
+                self.estado = 'FIN'
                 self.timer.cancel()
-                
-        elif self.estado == "ESPERANDO":
-            tiempo_actual = self.get_clock().now().nanoseconds / 1e9
-            if (tiempo_actual - self.tiempo_llegada_home) >= 1.5:
-                # Ya pasó el tiempo de gracia, iniciar siguiente experimento
+        elif self.estado == 'ESPERANDO':
+            if self.ahora() - self.t_llegada_home >= 1.5:
                 self.trayectoria_actual += 1
-                self.estado = "INICIO"
+                self.estado = 'INICIO'
 
-    def enviar_nueva_trayectoria(self, indice):
-        # 🛑 RESET DEL ÁRBITRO PARA AMBOS BRAZOS EN EL NUEVO EXPERIMENTO
-        self.colision_L = False 
-        self.colision_R = False 
-        
-        datos = self.rutas[indice]
+    def enviar_trayectoria(self, i):
+        self.contactos = set()
+        datos = self.rutas[i]
+        # The trial index is sent first so the controllers can label their logs
+        self.pub_logger_cmd.publish(String(data=f'START_{i}'))
         msg_L, msg_R = BezierTrajectory(), BezierTrajectory()
-        
-        msg_L.t_total = datos['t_total']; msg_R.t_total = datos['t_total']
-        msg_L.p0 = datos['left_arm']['p0']; msg_R.p0 = datos['right_arm']['p0']
-        msg_L.p1 = datos['left_arm']['p1']; msg_R.p1 = datos['right_arm']['p1']
-        msg_L.p2 = datos['left_arm']['p2']; msg_R.p2 = datos['right_arm']['p2']
-        msg_L.p3 = datos['left_arm']['p3']; msg_R.p3 = datos['right_arm']['p3']
-        
-        self.pub_traj_L.publish(msg_L); self.pub_traj_R.publish(msg_R)
-        
-        cmd_msg = String()
-        cmd_msg.data = "START"
-        self.pub_logger_cmd.publish(cmd_msg)
-        self.get_logger().info(f"▶️ Lanzando Experimento #{indice} (Duración: {msg_L.t_total}s)")
+        msg_L.t_total = msg_R.t_total = float(datos['t_total'])
+        for m, brazo in ((msg_L, 'left_arm'), (msg_R, 'right_arm')):
+            m.p0 = [float(x) for x in datos[brazo]['p0']]
+            m.p1 = [float(x) for x in datos[brazo]['p1']]
+            m.p2 = [float(x) for x in datos[brazo]['p2']]
+            m.p3 = [float(x) for x in datos[brazo]['p3']]
+        self.pub_traj_L.publish(msg_L)
+        self.pub_traj_R.publish(msg_R)
+        self.get_logger().info(f"Trial #{i} started (T = {msg_L.t_total} s)")
+
 
 def main(args=None):
     rclpy.init(args=args)
     nodo = BenchmarkDirector()
-    try: rclpy.spin(nodo)
-    except KeyboardInterrupt: pass
-    finally: nodo.destroy_node(); rclpy.try_shutdown()
+    try:
+        rclpy.spin(nodo)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        nodo.destroy_node()
+        rclpy.try_shutdown()
+
 
 if __name__ == '__main__':
     main()

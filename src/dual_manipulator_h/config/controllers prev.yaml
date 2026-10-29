@@ -1,0 +1,68 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 100
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    left_velocity_controller:
+      type: velocity_controllers/JointGroupVelocityController
+
+    right_velocity_controller:
+      type: velocity_controllers/JointGroupVelocityController
+
+
+# --------------------------------------------------------
+# 1. CONTROLADOR IZQUIERDO (Mapeo de ROS 2)
+# --------------------------------------------------------
+left_velocity_controller:
+  ros__parameters:
+    joints:
+      - left_joint1
+      - left_joint2
+      - left_joint3
+      - left_joint4
+      - left_joint5
+      - left_joint6
+    command_interfaces:
+      - velocity
+    state_interfaces:
+      - position
+      - velocity
+
+# --------------------------------------------------------
+# 2. CONTROLADOR DERECHO (Mapeo de ROS 2)
+# --------------------------------------------------------
+right_velocity_controller:
+  ros__parameters:
+    joints:
+      - right_joint1
+      - right_joint2
+      - right_joint3
+      - right_joint4
+      - right_joint5
+      - right_joint6
+    command_interfaces:
+      - velocity
+    state_interfaces:
+      - position
+      - velocity
+
+# --------------------------------------------------------
+# 3. LOS MÚSCULOS DE GAZEBO CLASSIC (El secreto del Torque)
+# --------------------------------------------------------
+gazebo_ros2_control:
+  ros__parameters:
+    pid_gains:
+      left_joint1:  {p: 100.0, i: 0.1, d: 1.0}
+      left_joint2:  {p: 100.0, i: 0.1, d: 1.0}
+      left_joint3:  {p: 100.0, i: 0.1, d: 1.0}
+      left_joint4:  {p: 100.0, i: 0.1, d: 1.0}
+      left_joint5:  {p: 100.0, i: 0.1, d: 1.0}
+      left_joint6:  {p: 100.0, i: 0.1, d: 1.0}
+      right_joint1: {p: 100.0, i: 0.1, d: 1.0}
+      right_joint2: {p: 100.0, i: 0.1, d: 1.0}
+      right_joint3: {p: 100.0, i: 0.1, d: 1.0}
+      right_joint4: {p: 100.0, i: 0.1, d: 1.0}
+      right_joint5: {p: 100.0, i: 0.1, d: 1.0}
+      right_joint6: {p: 100.0, i: 0.1, d: 1.0}

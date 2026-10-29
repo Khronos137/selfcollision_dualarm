@@ -84,6 +84,25 @@
       <inertial><origin xyz="0.00337 0.00000 0.00000" rpy="0 0 0"/><mass value="0.01919"/><inertia ixx="0.00000938" ixy="0.0" ixz="0.0" iyy="0.00000338" iyz="0.0" izz="0.00000635"/></inertial>
     </link>
 
+    <gazebo reference="${prefix}joint1">
+      <implicitSpringDamper>true</implicitSpringDamper>
+    </gazebo>
+    <gazebo reference="${prefix}joint2">
+      <implicitSpringDamper>true</implicitSpringDamper>
+    </gazebo>
+    <gazebo reference="${prefix}joint3">
+      <implicitSpringDamper>true</implicitSpringDamper>
+    </gazebo>
+    <gazebo reference="${prefix}joint4">
+      <implicitSpringDamper>true</implicitSpringDamper>
+    </gazebo>
+    <gazebo reference="${prefix}joint5">
+      <implicitSpringDamper>true</implicitSpringDamper>
+    </gazebo>
+    <gazebo reference="${prefix}joint6">
+      <implicitSpringDamper>true</implicitSpringDamper>
+    </gazebo>
+
     <ros2_control name="${prefix}GazeboSystem" type="system">
       <hardware>
         <plugin>gazebo_ros2_control/GazeboSystem</plugin>
@@ -95,6 +114,60 @@
       <joint name="${prefix}joint5"><command_interface name="velocity"/><state_interface name="position"/><state_interface name="velocity"/></joint>
       <joint name="${prefix}joint6"><command_interface name="velocity"/><state_interface name="position"/><state_interface name="velocity"/></joint>
     </ros2_control>
+
+    <gazebo reference="${prefix}link2">
+      <selfCollide>true</selfCollide>
+      <sensor name="${prefix}sensor_colision_link2" type="contact">
+        <always_on>true</always_on>
+        <update_rate>100.0</update_rate>
+        <contact>
+          <collision>${prefix}link2_collision</collision>
+        </contact>
+        <plugin name="${prefix}bumper_link2" filename="libgazebo_ros_bumper.so">
+          <ros>
+            <namespace>benchmark</namespace>
+            <remapping>bumper_states:=colisiones/${prefix}link2</remapping>
+          </ros>
+          <frame_name>${prefix}link2</frame_name>
+        </plugin>
+      </sensor>
+    </gazebo>
+
+    <gazebo reference="${prefix}link3">
+      <selfCollide>true</selfCollide>
+      <sensor name="${prefix}sensor_colision_link3" type="contact">
+        <always_on>true</always_on>
+        <update_rate>100.0</update_rate>
+        <contact>
+          <collision>${prefix}link3_collision</collision>
+        </contact>
+        <plugin name="${prefix}bumper_link3" filename="libgazebo_ros_bumper.so">
+          <ros>
+            <namespace>benchmark</namespace>
+            <remapping>bumper_states:=colisiones/${prefix}link3</remapping>
+          </ros>
+          <frame_name>${prefix}link3</frame_name>
+        </plugin>
+      </sensor>
+    </gazebo>
+
+    <gazebo reference="${prefix}link4">
+      <selfCollide>true</selfCollide>
+      <sensor name="${prefix}sensor_colision_link4" type="contact">
+        <always_on>true</always_on>
+        <update_rate>100.0</update_rate>
+        <contact>
+          <collision>${prefix}link4_collision</collision>
+        </contact>
+        <plugin name="${prefix}bumper_link4" filename="libgazebo_ros_bumper.so">
+          <ros>
+            <namespace>benchmark</namespace>
+            <remapping>bumper_states:=colisiones/${prefix}link4</remapping>
+          </ros>
+          <frame_name>${prefix}link4</frame_name>
+        </plugin>
+      </sensor>
+    </gazebo>
 
     <gazebo reference="${prefix}link5">
       <selfCollide>true</selfCollide>
