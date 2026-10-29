@@ -124,6 +124,123 @@ def fig_outcomes(df, algs, out, por_brazo=False):
         plt.close(fig)
 
 
+
+def _rc_orig():
+    return {'font.family': 'sans-serif', 'font.sans-serif': ['Arial', 'Liberation Sans', 'DejaVu Sans'],
+            'font.size': 11, 'axes.labelweight': 'bold', 'axes.labelsize': 11,
+            'xtick.labelsize': 11, 'ytick.labelsize': 10, 'axes.spines.top': True,
+            'axes.spines.right': True, 'axes.edgecolor': '#cccccc', 'axes.labelcolor': '#262626',
+            'xtick.color': '#262626', 'ytick.color': '#262626', 'pdf.fonttype': 42}
+
+
+def fig_tiempos(df, algs, out):
+    """Timing figures in the style of the original manuscript (no in-figure title).
+    collision_time: mean collision-detection time per trial (bar = mean over trials, dots = trials).
+    controlTime: per-trial mean and maximum callback time (box plots), with the 10 ms deadline."""
+    s = df[df.arm == 'LEFT']                      # timing columns are identical for both arm rows
+    nombres = [NOMBRE_ALG.get(a, a) for a in algs]
+    rng = np.random.default_rng(0)
+    with plt.rc_context(_rc_orig()):
+        # ---- collision detection time ----
+        fig, ax = plt.subplots(figsize=(5.5, 4.0))
+        colores = ['#add8e6', '#e6a23c']
+        for i, a in enumerate(algs):
+            v = s[s.algorithm == a].collision_mean_ms.dropna().values
+            ax.bar(i, v.mean(), width=0.8, color=colores[i % 2], edgecolor='#1a237e', linewidth=2, zorder=2)
+            ax.errorbar(i, v.mean(), yerr=v.std(ddof=1), color='#1a237e', capsize=6, lw=2, zorder=3)
+            ax.scatter(i + rng.uniform(-0.12, 0.12, len(v)), v, s=14, color='#333333', alpha=0.6, zorder=4)
+        ax.set_xticks(range(len(algs)))
+        ax.set_xticklabels(nombres, fontweight='bold')
+        ax.set_xlabel('Algorithm'); ax.set_ylabel('Execution Time (ms)')
+        ax.set_ylim(0, 1.3 * s[s.algorithm.isin(algs)].collision_mean_ms.max())
+        ax.grid(True, linestyle='--', color='#c5d1f5', zorder=0)
+        ax.set_axisbelow(True)
+        fig.tight_layout()
+        fig.savefig(os.path.join(out, 'collision_time.pdf'))
+        fig.savefig(os.path.join(out, 'collision_time.png'), dpi=150)
+        plt.close(fig)
+
+        # ---- complete callback time: mean vs maximum per trial ----
+        fig, ax = plt.subplots(figsize=(5.5, 4.0))
+        estilos = {'callback_mean_ms': ('#add8e6', 'Mean Time'), 'callback_max_ms': ('#f0b04f', 'Maximum Time')}
+        ymax = 0
+        for i, a in enumerate(algs):
+            for j, (col, (color, _)) in enumerate(estilos.items()):
+                v = s[s.algorithm == a][col].dropna().values
+                ymax = max(ymax, v.max())
+                pos = i + (-0.2 if j == 0 else 0.2)
+                ax.boxplot(v, positions=[pos], widths=0.3, patch_artist=True, showfliers=False,
+                           boxprops=dict(facecolor=color, edgecolor='#1a237e', linewidth=2),
+                           whiskerprops=dict(color='#1a237e', linewidth=1.5),
+                           capprops=dict(color='#1a237e', linewidth=1.5),
+                           medianprops=dict(color='#dc143c', linewidth=2.5), zorder=2)
+                ax.scatter(pos + rng.uniform(-0.08, 0.08, len(v)), v, s=14, color='#333333', alpha=0.5, zorder=3)
+        ax.axhline(10.0, color='black', linestyle=':', linewidth=2.5, zorder=1)
+        ax.set_xticks(range(len(algs)))
+        ax.set_xticklabels(nombres, fontweight='bold')
+        ax.set_xlabel('Algorithm'); ax.set_ylabel('Execution Time (ms)')
+        ax.set_ylim(0, max(14.5, 1.15 * ymax))
+        ax.grid(True, linestyle='--', color='#cccccc', zorder=0)
+        ax.set_axisbelow(True)
+        manijas = [plt.Rectangle((0, 0), 1, 1, fc=c, ec='#1a237e', lw=2) for c, _ in estilos.values()]
+        manijas.append(plt.Line2D([0], [0], color='black', linestyle=':', linewidth=2.5))
+        ax.legend(manijas, [n for _, n in estilos.values()] + ['Control Deadline (10.0 ms)'],
+                  title='Metric', title_fontproperties={'weight': 'bold', 'size': 11}, loc='upper right',
+                  frameon=False, ncol=1, prop={'weight': 'bold', 'size': 9})
+        fig.tight_layout()
+        fig.savefig(os.path.join(out, 'controlTime.pdf'))
+        fig.savefig(os.path.join(out, 'controlTime.png'), dpi=150)
+        plt.close(fig)
+
+def fig_metricas(df, algs, out):
+    """RMSE, Control Effort and Joint Path Length in the style of the original manuscript figures
+    (box plots per algorithm and arm, no in-figure title). Only the executions used in the paired
+    tests are shown: for each arm, trials in which neither method registered a collision."""
+    archivos = {'rmse_m': ('rmse_tracking', 'RMSE (m)'),
+                'ce': ('CONTROL_EFFORT', 'Control Effort (rad/s) [Log Scale]'),
+                'jpl_rad': ('JOINT_PATH_LENGTH', 'Joint Path Length (rad)')}
+    brazos = {'LEFT': ('#add8e6', 'Left'), 'RIGHT': ('#e6a23c', 'Right')}
+    validos = {}
+    for arm in brazos:
+        s = df[(df.arm == arm) & df.algorithm.isin(algs)]
+        col = s[s.outcome == 'COLLISION'].trial_id.unique()
+        validos[arm] = set(s.trial_id.unique()) - set(col)
+    rng = np.random.default_rng(0)
+    with plt.rc_context(_rc_orig()):
+        for metrica, (nombre, etiqueta) in archivos.items():
+            fig, ax = plt.subplots(figsize=(5.5, 4.0))
+            for i, a in enumerate(algs):
+                for j, (arm, (color, _)) in enumerate(brazos.items()):
+                    s = df[(df.algorithm == a) & (df.arm == arm) & df.trial_id.isin(validos[arm])]
+                    v = s[metrica].dropna().values
+                    pos = i + (-0.2 if j == 0 else 0.2)
+                    ax.boxplot(v, positions=[pos], widths=0.36, patch_artist=True, showfliers=False,
+                               whis=(0, 100),
+                               boxprops=dict(facecolor=color, edgecolor='#1a237e', linewidth=1.5),
+                               whiskerprops=dict(color='#1a237e', linewidth=1.5),
+                               capprops=dict(color='#1a237e', linewidth=1.5),
+                               medianprops=dict(color='#dc143c', linewidth=2.0), zorder=2)
+                    ax.scatter(pos + rng.uniform(-0.1, 0.1, len(v)), v, s=12, color='#333333',
+                               alpha=0.5, zorder=3)
+            ax.set_xticks(range(len(algs)))
+            ax.set_xticklabels([NOMBRE_ALG.get(a, a) for a in algs], fontweight='bold')
+            ax.set_xlabel('Algorithm'); ax.set_ylabel(etiqueta)
+            if metrica == 'ce':
+                ax.set_yscale('log')       # as in the original figure (wide range of the baseline)
+            else:
+                ax.set_ylim(bottom=0)
+            ax.grid(True, linestyle='--', color='#cccccc', zorder=0)
+            ax.set_axisbelow(True)
+            manijas = [plt.Rectangle((0, 0), 1, 1, fc=c, ec='#1a237e', lw=1.5) for c, _ in brazos.values()]
+            ax.legend(manijas, [n for _, n in brazos.values()], title='Manipulator',
+                      title_fontproperties={'weight': 'bold', 'size': 11}, loc='best',
+                      frameon=False, prop={'weight': 'bold', 'size': 10})
+            fig.tight_layout()
+            fig.savefig(os.path.join(out, nombre + '.pdf'))
+            fig.savefig(os.path.join(out, nombre + '.png'), dpi=150)
+            plt.close(fig)
+
+
 def km(tiempos, eventos, grilla):
     t = np.asarray(tiempos, float); e = np.asarray(eventos, bool)
     orden = np.argsort(t); t, e = t[orden], e[orden]
@@ -153,47 +270,72 @@ def historias(logs, alg, arm, grilla):
 
 
 def fig_convergence(df, algs, logs, tol, out):
+    """Convergence figure (replaces the previous Fig. 9), in the style of the original manuscript
+    figures and without in-figure titles; panels are identified by a letter only.
+    (a)-(b) fraction of executions that reached the tolerance vs t/T (Kaplan-Meier: safe timeouts
+    and collisions are censored at their final time); (c)-(d) median and interquartile band of the
+    distance to the target vs t/T, from the per-cycle logs."""
     grilla = np.linspace(0, 2.0, 201)
     con_logs = logs is not None and os.path.isdir(logs)
     filas = 2 if con_logs else 1
-    fig, axs = plt.subplots(filas, 2, figsize=(7.16, 2.3 * filas), sharex=True, squeeze=False)
-    for j, arm in enumerate(('LEFT', 'RIGHT')):
-        ax = axs[0, j]
-        for k, a in enumerate(algs):
-            s = df[(df.algorithm == a) & (df.arm == arm)]
-            tr = pd.to_numeric(s.t_reach_005_s if abs(tol - 0.05) < 1e-9 else s.t_reach_002_s,
-                               errors='coerce')
-            ev = tr.notna() & (s.result != 'COLLISION')
-            t = np.where(ev, tr / s.t_total_s, s.time_factor)
-            ax.step(grilla, km(t, ev, grilla), where='post', color=COL_ALG[k], linewidth=1.6,
-                    label=NOMBRE_ALG.get(a, a))
-        ax.axvline(1.0, color=SECUNDARIO, linewidth=0.8, linestyle=':')
-        ax.set_ylim(0, 1.02)
-        ax.set_title(f'({"a" if j == 0 else "b"}) {arm.lower()} arm: reached {tol:.2f} m', loc='left')
-        ax.set_ylabel('Fraction of executions')
-        ax.yaxis.grid(True, color=GRID, linewidth=0.6)
-        if j == 0:
-            ax.legend(frameon=False, loc='lower right')
-        if con_logs:
-            ax2 = axs[1, j]
+    col = ['#1f5fa8', '#e08a1e']                    # proposed (blue), baseline (orange)
+    rc = _rc_orig()
+    rc.update({'axes.titlesize': 11})
+    with plt.rc_context(rc):
+        fig, axs = plt.subplots(filas, 2, figsize=(10.0, 3.4 * filas), sharex=True, squeeze=False)
+        letras = iter('abcd')
+        for j, arm in enumerate(('LEFT', 'RIGHT')):
+            ax = axs[0, j]
             for k, a in enumerate(algs):
-                h = historias(logs, a, arm, grilla)
-                if len(h) == 0:
-                    continue
-                q1, q2, q3 = np.percentile(h, [25, 50, 75], axis=0)
-                ax2.fill_between(grilla, q1, q3, color=COL_ALG[k], alpha=0.18, linewidth=0)
-                ax2.plot(grilla, q2, color=COL_ALG[k], linewidth=1.6, label=NOMBRE_ALG.get(a, a))
-            ax2.axhline(tol, color=SECUNDARIO, linewidth=0.8, linestyle='--')
-            ax2.axvline(1.0, color=SECUNDARIO, linewidth=0.8, linestyle=':')
-            ax2.set_ylabel('Distance to target [m]')
-            ax2.set_title(f'({"c" if j == 0 else "d"}) {arm.lower()} arm: median and IQR', loc='left')
-            ax2.yaxis.grid(True, color=GRID, linewidth=0.6)
-    for ax in axs[-1]:
-        ax.set_xlabel(r'Normalized time $t/T$')
-    fig.tight_layout()
-    fig.savefig(os.path.join(out, 'fig_convergence.pdf'))
-    fig.savefig(os.path.join(out, 'fig_convergence.png'), dpi=200)
-    plt.close(fig)
+                s = df[(df.algorithm == a) & (df.arm == arm)]
+                tr = pd.to_numeric(s.t_reach_005_s if abs(tol - 0.05) < 1e-9 else s.t_reach_002_s,
+                                   errors='coerce')
+                ev = tr.notna() & (s.result != 'COLLISION')
+                t = np.where(ev, tr / s.t_total_s, s.time_factor)
+                ax.step(grilla, km(t, ev, grilla), where='post', color=col[k % 2], linewidth=2.2,
+                        label=NOMBRE_ALG.get(a, a))
+            ax.axvline(1.0, color='black', linewidth=1.5, linestyle=':')
+            ax.set_ylim(0, 1.05)
+            ax.set_ylabel('Fraction Reached' if j == 0 else '')
+            ax.grid(True, linestyle='--', color='#cccccc', zorder=0)
+            ax.text(0.02, 0.95, f'({next(letras)}) {arm.capitalize()} arm', transform=ax.transAxes,
+                    ha='left', va='top', fontweight='bold', fontsize=11)
+        fila_c = []
+        if con_logs:
+            for j, arm in enumerate(('LEFT', 'RIGHT')):
+                ax2 = axs[1, j]
+                for k, a in enumerate(algs):
+                    h = historias(logs, a, arm, grilla)
+                    if len(h) == 0:
+                        continue
+                    q1, q2, q3 = np.percentile(h, [25, 50, 75], axis=0)
+                    ax2.fill_between(grilla, q1, q3, color=col[k % 2], alpha=0.20, linewidth=0)
+                    ax2.plot(grilla, q2, color=col[k % 2], linewidth=2.2, label=NOMBRE_ALG.get(a, a))
+                ax2.axhline(tol, color='black', linewidth=1.5, linestyle='--')
+                ax2.axvline(1.0, color='black', linewidth=1.5, linestyle=':')
+                ax2.set_ylabel('Distance to Target (m)' if j == 0 else '')
+                ax2.grid(True, linestyle='--', color='#cccccc', zorder=0)
+                ax2.text(0.98, 0.95, f'({next(letras)}) {arm.capitalize()} arm', transform=ax2.transAxes,
+                         ha='right', va='top', fontweight='bold', fontsize=11)
+                fila_c.append(ax2)
+            y_max = max(a.get_ylim()[1] for a in fila_c)
+            for a in fila_c:
+                a.set_ylim(0, y_max)
+        for ax in axs[-1]:
+            ax.set_xlabel('Normalized Time t/T')
+        manijas = [plt.Line2D([0], [0], color=col[k % 2], linewidth=2.2) for k in range(len(algs))]
+        nombres = [NOMBRE_ALG.get(a, a) for a in algs]
+        manijas += [plt.Line2D([0], [0], color='black', linestyle=':', linewidth=1.5)]
+        nombres += ['Nominal Time (t = T)']
+        if con_logs:
+            manijas += [plt.Line2D([0], [0], color='black', linestyle='--', linewidth=1.5)]
+            nombres += [f'Tolerance ({tol:.2f} m)']
+        fig.legend(manijas, nombres, loc='upper center', ncol=len(nombres), frameon=False,
+                   prop={'weight': 'bold', 'size': 11}, bbox_to_anchor=(0.5, 1.0))
+        fig.tight_layout(rect=(0, 0, 1, 0.94 if con_logs else 0.88))
+        fig.savefig(os.path.join(out, 'fig_convergence.pdf'))
+        fig.savefig(os.path.join(out, 'fig_convergence.png'), dpi=150)
+        plt.close(fig)
 
 
 def main():
@@ -211,7 +353,10 @@ def main():
     algs = [x for x in a.algs if x in set(df.algorithm)]
     fig_outcomes(df, algs, a.out)
     fig_outcomes(df, algs, a.out, por_brazo=True)
+    if 'callback_mean_ms' in df.columns:
+        fig_tiempos(df, algs, a.out)
     fig_convergence(df, algs, a.logs, a.tol, a.out)
+    fig_metricas(df, algs, a.out)
     print('Saved:', sorted(os.listdir(a.out)))
 
 

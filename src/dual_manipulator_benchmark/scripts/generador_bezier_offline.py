@@ -1,20 +1,5 @@
 #!/usr/bin/env python3
-"""
-Stochastic X-crossing trajectory generator (Section V), revision 2.
 
-  * Fixed random seed (reproducible dataset).
-  * p0 = exact end-effector position at the home posture q = 0.
-  * Intermediate points (Eq. 30) with SCALAR interpolation weights eps_1 < eps_2.
-  * Terminal feasibility by rejection sampling:
-      (a) Cartesian clearance between end-effector targets (Eq. 31);
-      (b) configuration-space feasibility: a collision-free inverse-kinematics
-          solution of BOTH arms must exist at the targets (joint limits + full
-          capsule clearance: arm-arm, arm-torso and intra-arm) (R1-C14, R2-C18).
-  * Every rejected sample and its reason is counted and stored in the YAML header.
-
-Run from the source tree:
-    python3 generador_bezier_offline.py [--seed 2026] [--n 50] [--swap-zones] [--out FILE]
-"""
 import os
 import sys
 import math
@@ -94,7 +79,7 @@ def main():
     ap.add_argument('--n', type=int, default=50)
     ap.add_argument('--d-terminal', type=float, default=0.10, help='d_terminal_safe [m] (Eq. 31)')
     ap.add_argument('--swap-zones', action='store_true',
-                    help='exchange the target spheres of the two arms (R1-C19)')
+                    help='exchange the radii of the target spheres of the two arms (R1-C19)')
     ap.add_argument('--out', default=os.path.join(AQUI, '..', 'config', 'trayectorias_50.yaml'))
     args = ap.parse_args()
 

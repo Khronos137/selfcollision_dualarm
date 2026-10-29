@@ -39,7 +39,8 @@ def cargar(csv, prop, base):
 def clasificar(df, tol):
     col = df['result'].eq('COLLISION')
     df['outcome'] = np.where(col, 'COLLISION', np.where(df['final_err_m'] < tol, 'SUCCESS', 'SAFE_TIMEOUT'))
-    t_reach = df['t_reach_005_s'] if abs(tol - 0.05) < 1e-9 else np.nan
+    t_reach = df['t_reach_005_s'] if abs(tol - 0.05) < 1e-9 else (
+        df['t_reach_002_s'] if abs(tol - 0.02) < 1e-9 else np.nan)
     df['success_within_T'] = (~col) & (pd.to_numeric(t_reach, errors='coerce') <= df['t_total_s'])
     return df
 
